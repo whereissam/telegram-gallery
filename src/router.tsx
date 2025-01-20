@@ -5,7 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { App } from "./App";
 import { Home } from "./pages/Home";
-import { About } from "./pages/About";
+import { PrivateTelegramGallery } from "./pages/PrivateTelegramGallery";
 
 const rootRoute = createRootRoute({
   component: App,
@@ -19,8 +19,8 @@ const homeRoute = createRoute({
 
 const aboutRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/about",
-  component: About,
+  path: "/gallery",
+  component: PrivateTelegramGallery,
 });
 
 const routeTree = rootRoute.addChildren([homeRoute, aboutRoute]);

@@ -8,8 +8,8 @@ export function App() {
           <Link to="/" className="hover:text-gray-300">
             Home
           </Link>
-          <Link to="/about" className="hover:text-gray-300">
-            About
+          <Link to="/gallery" className="hover:text-gray-300">
+            Gallery
           </Link>
         </div>
       </nav>
