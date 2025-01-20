@@ -1,8 +1,7 @@
 {
-  "name": "react-tailwind-starter-template",
+  "name": "telegram-gallery",
   "private": true,
   "version": "0.0.0",
-  "description": "A starter template for React projects with TailwindCSS, TanStack Router, and Vite.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mtproto/core": "^6.3.0",
     "@radix-ui/react-slot": "^1.1.1",
     "@tanstack/react-router": "^1.97.1",
     "@vitejs/plugin-react": "^4.3.4",
@@ -19,8 +19,10 @@
     "lucide-react": "^0.472.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-telegram-login": "^1.1.2",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "telegram-mtproto": "^1.0.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
