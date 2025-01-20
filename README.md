@@ -1,130 +1,184 @@
-# Telegram Image Gallery
+# 📱 Telegram Image Gallery
 
-A web application that allows you to view and manage images from your Telegram saved messages. Built with React, TypeScript, and Node.js, using Telegram's MTProto protocol for secure authentication.
+A modern web application for viewing and managing images from your Telegram saved messages. Built with React, TypeScript, and Node.js, leveraging Telegram's MTProto protocol for secure authentication and data access.
 
-## Features
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)
+![Bun](https://img.shields.io/badge/bun-latest-orange.svg)
 
-- 🔐 Secure authentication with Telegram
-- 📱 Two-factor authentication (2FA) support
-- 🖼️ View saved images from Telegram
-- 🔄 Real-time updates and refresh
-- 💫 Responsive design
+## ✨ Key Features
 
-## Prerequisites
+- **Secure Authentication** - Direct integration with Telegram's official authentication system
+- **Enhanced Security** - Full support for Two-factor authentication (2FA)
+- **Smart Gallery Management** - Intuitive interface for viewing and organizing saved images
+- **Real-time Updates** - Instant synchronization with your Telegram saved messages
+- **Modern Design** - Fully responsive interface that works on all devices
+- **Performance Optimized** - Fast loading and efficient image handling
 
-Before you begin, ensure you have:
-- Node.js (v18 or higher)
-- Bun package manager
+## 🚀 Quick Start
+
+### Prerequisites
+
+Before installation, ensure you have:
+- Node.js (version 18 or higher)
+- Bun package manager installed
 - Telegram API credentials (api_id and api_hash)
 
-## Project Structure
-📁 telegram-gallery/
-├── 📁 packages/
-│   ├── 📁 client/                 # Frontend React application
-│   │   ├── 📁 src/
-│   │   │   ├── 📁 components/     # Reusable UI components
-│   │   │   │   ├── 📁 ui/        # Basic UI components
-│   │   │   │   └── 📁 features/  # Feature-specific components
-│   │   │   ├── 📁 pages/         # Page components
-│   │   │   ├── 📁 hooks/         # Custom React hooks
-│   │   │   ├── 📁 utils/         # Utility functions
-│   │   │   ├── 📁 types/         # TypeScript type definitions
-│   │   │   ├── 📁 styles/        # Global styles and themes
-│   │   │   └── 📁 config/        # Frontend configuration
-│   │   ├── .env.example
+### Installation Steps
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/yourusername/telegram-gallery.git
+   cd telegram-gallery
+   ```
+
+2. **Set Up API Credentials**
+   - Visit [Telegram API Development Tools](https://my.telegram.org/apps)
+   - Create a new application
+   - Save your `api_id` and `api_hash`
+
+3. **Configure Backend**
+   ```bash
+   cd packages/server
+   bun install
+   cp .env.example .env
+   ```
+   Edit `.env` with your credentials:
+   ```env
+   API_ID=your_api_id
+   API_HASH=your_api_hash
+   PORT=3000
+   ```
+
+4. **Configure Frontend**
+   ```bash
+   cd ../client
+   bun install
+   cp .env.example .env
+   ```
+   Add required environment variables:
+   ```env
+   VITE_API_URL=http://localhost:3000
+   ```
+
+5. **Start Development Servers**
+   ```bash
+   # Terminal 1 - Backend
+   cd packages/server
+   bun --hot index.ts
+
+   # Terminal 2 - Frontend
+   cd packages/client
+   bun dev
+   ```
+
+   Access the application at `http://localhost:5173`
+
+## 📁 Project Structure
+
+```
+telegram-gallery/
+├── packages/
+│   ├── client/                 # React frontend
+│   │   ├── src/
+│   │   │   ├── components/     # UI components
+│   │   │   ├── pages/         # Page components
+│   │   │   ├── hooks/         # Custom React hooks
+│   │   │   └── ...
 │   │   └── package.json
 │   │
-│   └── 📁 server/                # Backend Express server
-│       ├── 📁 src/
-│       │   ├── 📁 controllers/   # Request handlers
-│       │   ├── 📁 services/      # Business logic
-│       │   ├── 📁 middleware/    # Express middleware
-│       │   ├── 📁 types/         # TypeScript type definitions
-│       │   └── 📁 utils/         # Utility functions
-│       ├── 📁 storage/
-│       │   └── 📁 sessions/      # Telegram session storage
-│       ├── .env.example
+│   └── server/                # Express backend
+│       ├── src/
+│       │   ├── controllers/   # Request handlers
+│       │   ├── services/      # Business logic
+│       │   └── ...
 │       └── package.json
 │
-├── 📁 shared/                    # Shared code between packages
-│   ├── 📁 types/                 # Shared TypeScript types
-│   └── 📁 utils/                 # Shared utilities
-│
-├── .gitignore                    # Git ignore file
-├── .env.example                  # Root environment variables
-├── package.json                  # Root package.json for workspaces
-├── README.md                     # Project documentation
-└── tsconfig.json                # Base TypeScript configuration
+└── shared/                    # Shared utilities
+    ├── types/
+    └── utils/
+```
 
-## Getting Started
+## 🔒 Security Best Practices
 
-### 1. Clone the repository
-```bash
-git clone https://github.com/yourusername/telegram-gallery.git
-cd telegram-gallery
-2. Obtain Telegram API Credentials
+- Never commit `.env` files to version control
+- Store API credentials securely using environment variables
+- Enable HTTPS in production environments
+- Regularly update dependencies for security patches
+- Implement rate limiting for API endpoints
+- Use secure session storage
+- Validate all user inputs
 
-Visit https://my.telegram.org/apps
-Log in with your phone number
-Create a new application
-Note down your api_id and api_hash
+## 🛠 Development Stack
 
-3. Backend Setup
-bashCopycd server
-bun install
+### Frontend
+- React 18 with TypeScript
+- Vite for build tooling
+- shadcn/ui for component library
+- TanStack Query for data fetching
+- Tailwind CSS for styling
 
-# Create .env file
-cp .env.example .env
-# Edit .env with your credentials
+### Backend
+- Express.js with TypeScript
+- Bun runtime for improved performance
+- MTProto for Telegram API integration
+- JWT for session management
+- Zod for validation
 
-# Start the server
-bun --hot index.ts
-4. Frontend Setup
-bashCopycd client
-bun install
-bun dev
-The application will be available at http://localhost:5173
-Environment Variables
-Backend (.env)
-envCopyAPI_ID=your_api_id
-API_HASH=your_api_hash
-PORT=3000
-Frontend (.env)
-envCopyVITE_API_URL=http://localhost:3000
-Security Considerations
+## 🔄 Authentication Flow
 
-Never commit .env files to version control
-Store API credentials securely
-The application stores session data locally in the sessions directory
-Use HTTPS in production
+1. **Initial Authentication**
+   - Phone number submission
+   - Verification code validation
+   - 2FA password (if enabled)
 
-Development
-The project uses:
-- React with TypeScript for the frontend
-- Express with Bun for the backend
-- MTProto for Telegram API interaction
-- shadcn/ui for components
+2. **Session Management**
+   - Secure token generation
+   - Automatic session refresh
+   - Logout handling
 
-Authentication Flow
-- Phone number verification
-- SMS code verification
-- Two-factor authentication (if enabled)
-- Session management
-- Secure message fetching
+## 🤝 Contributing
 
-Contributing
-- Fork the repository
-- Create your feature branch (git checkout -b feature/AmazingFeature)
-- Commit your changes (git commit -m 'Add some AmazingFeature')
-- Push to the branch (git push origin feature/AmazingFeature)
-- Open a Pull Request
+We welcome contributions! Please follow these steps:
 
-### License
-This project is licensed under the MIT License - see the LICENSE file for details.
-Acknowledgments
-- MTProto - Telegram's secure protocol
-- shadcn/ui - UI components
-- Telegram API - Official Telegram API documentation
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-### Support
-If you encounter any issues or have questions, please file an issue on the GitHub repository.
+### Development Guidelines
+
+- Follow the existing code style
+- Write meaningful commit messages
+- Add tests for new features
+- Update documentation as needed
+- Use conventional commits format
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [Telegram API](https://core.telegram.org/api) - Official Telegram API documentation
+- [MTProto](https://core.telegram.org/mtproto) - Telegram's secure protocol
+- [shadcn/ui](https://ui.shadcn.com/) - UI component library
+- [Bun](https://bun.sh/) - JavaScript runtime & tooling
+
+## 💬 Support
+
+Need help? Here are some options:
+
+- Create an issue in the [GitHub repository](https://github.com/yourusername/telegram-gallery/issues)
+- Join our [Discord community](https://discord.gg/yourdiscord)
+- Check out the [FAQ](docs/FAQ.md)
+
+## 📈 Roadmap
+
+- [ ] Image batch operations
+- [ ] Advanced search capabilities
+- [ ] Folder organization
+- [ ] Image editing features
+- [ ] Mobile applications
+- [ ] Offline support
