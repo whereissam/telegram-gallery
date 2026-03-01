@@ -67,25 +67,25 @@ Core E2E pipeline is working: Telegram auth flow (phone → code → 2FA), image
 
 ---
 
-## Medium Priority
+## Medium Priority — Completed
 
 ### Authentication Improvements
-- [ ] Add session persistence — currently auth is lost on server restart
-- [ ] Add logout endpoint and UI button
-- [ ] Handle `FILE_REFERENCE_EXPIRED` errors (re-fetch message to get fresh reference)
+- [x] Add session persistence — MTProto persists to `server/sessions/telegram.json`
+- [x] Add logout endpoint (`POST /api/logout`) and UI button
+- [x] Handle `FILE_REFERENCE_EXPIRED` errors (re-fetch message to get fresh reference)
 
 ### Client UI Enhancements
-- [ ] Implement search functionality (by caption text)
-- [ ] Add image grid size toggle (2/3/4 columns)
-- [ ] Add date-based grouping/sorting for images
-- [ ] Add error boundary component
-- [ ] Infinite scroll instead of "Load More" button
+- [x] Implement search functionality (by caption text)
+- [x] Add image grid size toggle (2/3/4 columns)
+- [x] Add date-based grouping/sorting for images
+- [x] Add error boundary component
+- [x] Infinite scroll instead of "Load More" button (IntersectionObserver)
 
 ### Server Improvements
-- [ ] Add request validation with Zod
-- [ ] Add rate limiting to auth endpoints
-- [ ] Add proper TypeScript types for MTProto responses
-- [ ] Persist media cache to disk (survives server restart)
+- [x] Add request validation with Zod
+- [x] Add rate limiting to auth endpoints (10 req / 15 min)
+- [x] Add proper TypeScript types for MTProto responses (`server/types.d.ts`)
+- [x] Persist media cache to disk (`server/cache/`, two-tier memory + disk)
 
 ---
 

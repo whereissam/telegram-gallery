@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ImageIcon } from "lucide-react";
 
@@ -7,13 +7,17 @@ export interface GalleryImage {
   date: number;
   message: string;
   mediaType: string;
+  mimeType: string;
   mediaUrl: string;
   thumbnailUrl: string;
 }
 
+export type ColumnCount = 2 | 3 | 4;
+
 interface GalleryGridProps {
   images: GalleryImage[];
   onImageClick: (index: number) => void;
+  columns?: ColumnCount;
 }
 
 function GalleryItem({
@@ -44,19 +48,16 @@ function GalleryItem({
       className="mb-3 break-inside-avoid cursor-pointer group relative rounded-xl overflow-hidden"
       onClick={() => onImageClick(index)}
     >
-      {/* Skeleton placeholder */}
       {!loaded && !errored && (
         <Skeleton className="w-full aspect-[4/3] rounded-xl" />
       )}
 
-      {/* Error state */}
       {errored && (
         <div className="w-full aspect-[4/3] rounded-xl bg-secondary/50 flex items-center justify-center">
           <ImageIcon className="w-8 h-8 text-muted-foreground/40" />
         </div>
       )}
 
-      {/* Image */}
       <img
         src={image.thumbnailUrl}
         alt={caption}
@@ -68,7 +69,6 @@ function GalleryItem({
         }`}
       />
 
-      {/* Hover overlay */}
       <div className="absolute inset-0 rounded-xl bg-gradient-to-t from-black/70 via-black/0 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end">
         <div className="p-3 w-full">
           {image.message && (
@@ -83,18 +83,64 @@ function GalleryItem({
   );
 }
 
-export function GalleryGrid({ images, onImageClick }: GalleryGridProps) {
+const columnClasses: Record<ColumnCount, string> = {
+  2: "columns-1 sm:columns-2 gap-3",
+  3: "columns-1 sm:columns-2 lg:columns-3 gap-3",
+  4: "columns-2 sm:columns-3 lg:columns-4 gap-3",
+};
+
+interface DateGroup {
+  label: string;
+  items: { image: GalleryImage; globalIndex: number }[];
+}
+
+function groupByDate(images: GalleryImage[]): DateGroup[] {
+  const groups: DateGroup[] = [];
+  let currentLabel = "";
+
+  for (let i = 0; i < images.length; i++) {
+    const label = new Date(images[i].date * 1000).toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    if (label !== currentLabel) {
+      currentLabel = label;
+      groups.push({ label, items: [] });
+    }
+
+    groups[groups.length - 1].items.push({ image: images[i], globalIndex: i });
+  }
+
+  return groups;
+}
+
+export function GalleryGrid({ images, onImageClick, columns = 3 }: GalleryGridProps) {
   if (images.length === 0) return null;
 
+  const groups = useMemo(() => groupByDate(images), [images]);
+
   return (
-    <div className="columns-1 sm:columns-2 lg:columns-3 gap-3">
-      {images.map((image, index) => (
-        <GalleryItem
-          key={image.id}
-          image={image}
-          index={index}
-          onImageClick={onImageClick}
-        />
+    <div>
+      {groups.map((group) => (
+        <div key={group.label} className="mb-6">
+          <div className="sticky top-[52px] z-30 py-2">
+            <span className="text-xs font-medium text-muted-foreground bg-background/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-border/50">
+              {group.label}
+            </span>
+          </div>
+          <div className={columnClasses[columns]}>
+            {group.items.map(({ image, globalIndex }) => (
+              <GalleryItem
+                key={image.id}
+                image={image}
+                index={globalIndex}
+                onImageClick={onImageClick}
+              />
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );

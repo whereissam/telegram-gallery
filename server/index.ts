@@ -3,8 +3,12 @@ import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import MTProto from '@mtproto/core';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
+import { z } from 'zod/v4';
+import rateLimit from 'express-rate-limit';
 
+// --- Config ---
 const corsOptions = {
   origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   credentials: true,
@@ -16,15 +20,25 @@ const app = express();
 app.use(cors(corsOptions));
 app.use(express.json());
 
-const storagePath = path.resolve(import.meta.dirname, 'sessions', 'telegram.json');
+// --- Rate limiting ---
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many auth attempts, please try again later' },
+});
+
+// --- MTProto setup ---
+const sessionsDir = path.resolve(import.meta.dirname, 'sessions');
+fs.mkdirSync(sessionsDir, { recursive: true });
+const storagePath = path.resolve(sessionsDir, 'telegram.json');
 
 const createMTProto = () => {
   return new MTProto({
     api_id: process.env.API_ID,
     api_hash: process.env.API_HASH,
-    storageOptions: {
-      path: storagePath
-    }
+    storageOptions: { path: storagePath }
   });
 };
 
@@ -53,7 +67,71 @@ mtproto.updateInitConnectionParams({
   langCode: 'en'
 });
 
-// Helper function for modular exponentiation
+// --- Auth middleware ---
+async function requireAuth(_req: Request, res: Response, next: Function) {
+  try {
+    await mtproto.call('users.getUsers', { id: [{ _: 'inputUserSelf' }] });
+    next();
+  } catch {
+    res.status(401).json({ error: 'Authentication required' });
+  }
+}
+
+// --- Validation ---
+class ValidationError extends Error {
+  constructor(public issues: z.core.$ZodIssue[]) {
+    super('Validation failed');
+    this.name = 'ValidationError';
+  }
+}
+
+function validate<T>(schema: z.ZodType<T>, data: unknown): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    throw new ValidationError(result.error.issues);
+  }
+  return result.data;
+}
+
+const sendCodeSchema = z.object({
+  phone: z.string().min(1, 'Phone number is required'),
+});
+
+const signInSchema = z.object({
+  phone: z.string().min(1),
+  code: z.string().min(1, 'Verification code is required'),
+  phone_code_hash: z.string().min(1),
+});
+
+const verify2faSchema = z.object({
+  password: z.string().min(1, 'Password is required'),
+});
+
+const messagesQuerySchema = z.object({
+  offset_id: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(50).default(30),
+});
+
+const mediaParamsSchema = z.object({
+  messageId: z.coerce.number().int().positive(),
+});
+
+const mediaSizeQuerySchema = z.object({
+  size: z.enum(['thumbnail', 'full']).default('full'),
+});
+
+function handleValidationError(error: unknown, res: Response): boolean {
+  if (error instanceof ValidationError) {
+    res.status(400).json({
+      error: 'Validation failed',
+      details: error.issues.map(i => ({ path: i.path, message: i.message })),
+    });
+    return true;
+  }
+  return false;
+}
+
+// --- Crypto helpers ---
 function powMod(base: bigint, exponent: bigint, modulus: bigint): bigint {
   let result = 1n;
   base = base % modulus;
@@ -67,11 +145,9 @@ function powMod(base: bigint, exponent: bigint, modulus: bigint): bigint {
   return result;
 }
 
-// Helper function to transform errors
 const handleMTProtoError = (error: any) => {
   console.error('MTProto error:', error);
-
-  const errorMessages: { [key: string]: string } = {
+  const errorMessages: Record<string, string> = {
     PHONE_NUMBER_INVALID: 'Invalid phone number format',
     PHONE_CODE_INVALID: 'Invalid verification code',
     PHONE_CODE_EXPIRED: 'Verification code expired',
@@ -79,23 +155,20 @@ const handleMTProtoError = (error: any) => {
     PASSWORD_HASH_INVALID: 'Invalid password',
     AUTH_RESTART: 'Authentication failed, please try again'
   };
-
   return errorMessages[error.error_message] || 'An unexpected error occurred';
 };
 
-// Helper to pad numbers to 2048 bits
 const padTo2048Bits = (num: bigint): Uint8Array => {
   return new Uint8Array(Buffer.from(num.toString(16).padStart(512, '0'), 'hex'));
 };
 
-// Helper to convert Buffer to BigInt
 const bufferToBigInt = (buffer: Uint8Array): bigint => {
   return BigInt('0x' + Buffer.from(buffer).toString('hex'));
 };
 
 const calculateSRP = async (password: string) => {
   try {
-    const passwordData = await mtproto.call('account.getPassword');
+    const passwordData: AccountPassword = await mtproto.call('account.getPassword');
     console.log('Password data received');
 
     const currentAlgo = passwordData.current_algo;
@@ -140,7 +213,8 @@ const calculateSRP = async (password: string) => {
 
     const A = powMod(gBigInt, aBigInt, pBigInt);
 
-    const k = bufferToBigInt(H(new Uint8Array([...p, g])));
+    const gBytes = padTo2048Bits(gBigInt);
+    const k = bufferToBigInt(H(new Uint8Array([...p, ...gBytes])));
 
     const u = bufferToBigInt(H(new Uint8Array([
       ...padTo2048Bits(A),
@@ -156,7 +230,7 @@ const calculateSRP = async (password: string) => {
     );
 
     const hp = H(p);
-    const hg = H(new Uint8Array([g]));
+    const hg = H(gBytes);
     const xored = new Uint8Array(hp.length);
     for (let i = 0; i < hp.length; i++) {
       xored[i] = hp[i] ^ hg[i];
@@ -185,44 +259,66 @@ const calculateSRP = async (password: string) => {
 // --- Photo size picker ---
 type SizeMode = 'thumbnail' | 'full';
 
-function pickPhotoSize(sizes: any[], mode: SizeMode): any {
+function pickPhotoSize(sizes: PhotoSize[], mode: SizeMode): PhotoSize {
   const fullOrder = ['y', 'x', 'w'];
   const thumbOrder = ['m', 's'];
   const order = mode === 'full' ? fullOrder : thumbOrder;
   for (const type of order) {
-    const found = sizes.find((s: any) => s.type === type);
+    const found = sizes.find((s) => s.type === type);
     if (found) return found;
   }
   return sizes[sizes.length - 1];
 }
 
 // --- File downloader ---
-const CHUNK_SIZE = 256 * 1024; // 256 KB
+const CHUNK_SIZE = 256 * 1024;
 
-async function downloadFile(location: any, _dcId?: number): Promise<Uint8Array> {
+async function downloadFile(
+  location: InputFileLocation,
+  _dcId?: number,
+  onExpired?: () => Promise<InputFileLocation>,
+): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   let offset = 0;
+  let originalDc: number | null = null;
+  let currentLocation = location;
 
-  while (true) {
-    try {
-      const result = await mtproto.call('upload.getFile', {
-        location,
-        offset,
-        limit: CHUNK_SIZE,
-      });
+  try {
+    while (true) {
+      try {
+        const result: UploadFile = await mtproto.call('upload.getFile', {
+          location: currentLocation,
+          offset,
+          limit: CHUNK_SIZE,
+        });
 
-      const bytes = new Uint8Array(result.bytes);
-      if (bytes.length === 0) break;
-      chunks.push(bytes);
-      offset += bytes.length;
-      if (bytes.length < CHUNK_SIZE) break;
-    } catch (error: any) {
-      if (error.error_message?.startsWith('FILE_MIGRATE_')) {
-        const newDc = parseInt(error.error_message.split('FILE_MIGRATE_')[1]);
-        await mtproto.setDefaultDc(newDc);
-        continue;
+        const bytes = new Uint8Array(result.bytes);
+        if (bytes.length === 0) break;
+        chunks.push(bytes);
+        offset += bytes.length;
+        if (bytes.length < CHUNK_SIZE) break;
+      } catch (error: any) {
+        if (error.error_message?.startsWith('FILE_MIGRATE_')) {
+          const newDc = parseInt(error.error_message.split('FILE_MIGRATE_')[1]);
+          if (originalDc === null) {
+            const dcInfo = await mtproto.call('help.getNearestDc');
+            originalDc = dcInfo.this_dc;
+          }
+          await mtproto.setDefaultDc(newDc);
+          continue;
+        }
+        if (error.error_message === 'FILE_REFERENCE_EXPIRED' && onExpired) {
+          currentLocation = await onExpired();
+          chunks.length = 0;
+          offset = 0;
+          continue;
+        }
+        throw error;
       }
-      throw error;
+    }
+  } finally {
+    if (originalDc !== null) {
+      await mtproto.setDefaultDc(originalDc);
     }
   }
 
@@ -236,16 +332,147 @@ async function downloadFile(location: any, _dcId?: number): Promise<Uint8Array> 
   return result;
 }
 
-// --- Media cache ---
-const mediaCache = new Map<string, { data: Uint8Array; mimeType: string }>();
-const MAX_CACHE = 200;
+// --- Two-tier media cache (memory + disk) ---
+const memoryCache = new Map<string, { data: Uint8Array; mimeType: string; timestamp: number; size: number }>();
+const MAX_CACHE_ENTRIES = 200;
+const MAX_CACHE_BYTES = 100 * 1024 * 1024;
+const CACHE_TTL = 30 * 60 * 1000;
+let totalCacheBytes = 0;
+const CACHE_DIR = path.resolve(import.meta.dirname, 'cache');
+
+fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+function safeCacheKey(key: string): string {
+  return key.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function cacheGet(key: string) {
+  key = safeCacheKey(key);
+  // Check memory first
+  const entry = memoryCache.get(key);
+  if (entry) {
+    if (Date.now() - entry.timestamp > CACHE_TTL) {
+      totalCacheBytes -= entry.size;
+      memoryCache.delete(key);
+    } else {
+      return entry;
+    }
+  }
+
+  // Check disk
+  const binPath = path.join(CACHE_DIR, `${key}.bin`);
+  const metaPath = path.join(CACHE_DIR, `${key}.meta`);
+  try {
+    const data = new Uint8Array(fs.readFileSync(binPath));
+    const mimeType = fs.readFileSync(metaPath, 'utf-8');
+    memoryCacheSet(key, data, mimeType);
+    return { data, mimeType };
+  } catch {
+    return null;
+  }
+}
+
+function memoryCacheSet(key: string, data: Uint8Array, mimeType: string) {
+  const now = Date.now();
+  // Evict expired entries
+  for (const [k, v] of memoryCache) {
+    if (now - v.timestamp > CACHE_TTL) {
+      totalCacheBytes -= v.size;
+      memoryCache.delete(k);
+    }
+  }
+  // Evict oldest if over size or entry limit
+  while (totalCacheBytes + data.length > MAX_CACHE_BYTES || memoryCache.size >= MAX_CACHE_ENTRIES) {
+    const firstKey = memoryCache.keys().next().value;
+    if (!firstKey) break;
+    const entry = memoryCache.get(firstKey)!;
+    totalCacheBytes -= entry.size;
+    memoryCache.delete(firstKey);
+  }
+  memoryCache.set(key, { data, mimeType, timestamp: now, size: data.length });
+  totalCacheBytes += data.length;
+}
 
 function cacheSet(key: string, data: Uint8Array, mimeType: string) {
-  if (mediaCache.size >= MAX_CACHE) {
-    const firstKey = mediaCache.keys().next().value;
-    if (firstKey) mediaCache.delete(firstKey);
+  key = safeCacheKey(key);
+  memoryCacheSet(key, data, mimeType);
+  const binPath = path.join(CACHE_DIR, `${key}.bin`);
+  const metaPath = path.join(CACHE_DIR, `${key}.meta`);
+  fs.promises.writeFile(binPath, data).catch(() => {});
+  fs.promises.writeFile(metaPath, mimeType).catch(() => {});
+}
+
+function clearCache() {
+  memoryCache.clear();
+  totalCacheBytes = 0;
+  try {
+    const files = fs.readdirSync(CACHE_DIR);
+    for (const file of files) {
+      const filePath = path.join(CACHE_DIR, file);
+      if (fs.lstatSync(filePath).isFile()) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  } catch {
+    // ignore
   }
-  mediaCache.set(key, { data, mimeType });
+}
+
+// --- Helper to build location + mime from a message ---
+function fetchLocationAndMime(
+  msg: Message,
+  size: SizeMode,
+): { location: InputFileLocation; mimeType: string; dcId?: number } | null {
+  if (!msg.media) return null;
+
+  if (msg.media._ === 'messageMediaPhoto' && msg.media.photo) {
+    const photo = msg.media.photo;
+    const photoSize = pickPhotoSize(photo.sizes, size);
+    return {
+      location: {
+        _: 'inputPhotoFileLocation',
+        id: photo.id,
+        access_hash: photo.access_hash,
+        file_reference: photo.file_reference,
+        thumb_size: photoSize.type,
+      },
+      mimeType: 'image/jpeg',
+      dcId: photo.dc_id,
+    };
+  }
+
+  if (msg.media._ === 'messageMediaDocument' && msg.media.document) {
+    const doc = msg.media.document;
+
+    if (size === 'thumbnail' && doc.thumbs && doc.thumbs.length > 0) {
+      const thumb = pickPhotoSize(doc.thumbs, 'thumbnail');
+      return {
+        location: {
+          _: 'inputDocumentFileLocation',
+          id: doc.id,
+          access_hash: doc.access_hash,
+          file_reference: doc.file_reference,
+          thumb_size: thumb.type,
+        },
+        mimeType: 'image/jpeg',
+        dcId: doc.dc_id,
+      };
+    }
+
+    return {
+      location: {
+        _: 'inputDocumentFileLocation',
+        id: doc.id,
+        access_hash: doc.access_hash,
+        file_reference: doc.file_reference,
+        thumb_size: '',
+      },
+      mimeType: doc.mime_type || 'application/octet-stream',
+      dcId: doc.dc_id,
+    };
+  }
+
+  return null;
 }
 
 // --- Auth status endpoint ---
@@ -254,16 +481,20 @@ app.get('/api/auth/status', async (_req: Request, res: Response) => {
     const result = await mtproto.call('users.getUsers', {
       id: [{ _: 'inputUserSelf' }]
     });
-    res.json({ authenticated: true, user: result[0] });
+    const user = result[0];
+    res.json({
+      authenticated: true,
+      user: { id: user.id, first_name: user.first_name, last_name: user.last_name },
+    });
   } catch (_error: any) {
     res.json({ authenticated: false });
   }
 });
 
-// --- Auth endpoints ---
-app.post('/api/sendCode', async (req: Request, res: Response) => {
+// --- Auth endpoints (rate-limited) ---
+app.post('/api/sendCode', authLimiter, async (req: Request, res: Response) => {
   try {
-    const { phone } = req.body;
+    const { phone } = validate(sendCodeSchema, req.body);
     await resetConnection();
 
     try {
@@ -294,14 +525,15 @@ app.post('/api/sendCode', async (req: Request, res: Response) => {
       }
     }
   } catch (error: any) {
+    if (handleValidationError(error, res)) return;
     console.error('Send code error:', error);
     res.status(500).json({ error: error.error_message });
   }
 });
 
-app.post('/api/signIn', async (req: Request, res: Response) => {
+app.post('/api/signIn', authLimiter, async (req: Request, res: Response) => {
   try {
-    const { phone, code, phone_code_hash } = req.body;
+    const { phone, code, phone_code_hash } = validate(signInSchema, req.body);
     const result = await mtproto.call('auth.signIn', {
       phone_number: phone,
       phone_code: code,
@@ -309,6 +541,7 @@ app.post('/api/signIn', async (req: Request, res: Response) => {
     });
     res.json(result);
   } catch (error: any) {
+    if (handleValidationError(error, res)) return;
     if (error.error_message === 'SESSION_PASSWORD_NEEDED') {
       res.json({
         requiresPassword: true,
@@ -321,9 +554,9 @@ app.post('/api/signIn', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/verify-2fa', async (req: Request, res: Response) => {
+app.post('/api/verify-2fa', authLimiter, async (req: Request, res: Response) => {
   try {
-    const { password } = req.body;
+    const { password } = validate(verify2faSchema, req.body);
     await initConnection();
 
     const srpParams = await calculateSRP(password);
@@ -339,6 +572,7 @@ app.post('/api/verify-2fa', async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (error: any) {
+    if (handleValidationError(error, res)) return;
     console.error('2FA verification error:', error);
     res.status(500).json({
       error: error.error_message || 'Failed to verify 2FA password'
@@ -346,13 +580,23 @@ app.post('/api/verify-2fa', async (req: Request, res: Response) => {
   }
 });
 
-// --- Messages endpoint with pagination ---
-app.get('/api/messages', async (req: Request, res: Response) => {
+// --- Logout endpoint (auth-guarded) ---
+app.post('/api/logout', requireAuth, async (_req: Request, res: Response) => {
   try {
-    const offsetId = parseInt(req.query.offset_id as string) || 0;
-    const limit = Math.min(parseInt(req.query.limit as string) || 30, 50);
+    await mtproto.call('auth.logOut');
+  } catch {
+    // Ignore errors — always clear local state
+  }
+  clearCache();
+  res.json({ success: true });
+});
 
-    const messages = await mtproto.call('messages.getHistory', {
+// --- Messages endpoint with pagination (auth-guarded) ---
+app.get('/api/messages', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { offset_id: offsetId, limit } = validate(messagesQuerySchema, req.query);
+
+    const messages: MessagesResponse = await mtproto.call('messages.getHistory', {
       peer: { _: 'inputPeerSelf' },
       offset_id: offsetId,
       offset_date: 0,
@@ -363,14 +607,14 @@ app.get('/api/messages', async (req: Request, res: Response) => {
       hash: 0
     });
 
-    const mediaMessages = messages.messages.filter((msg: any) => {
+    const mediaMessages = messages.messages.filter((msg) => {
       if (!msg.media) return false;
       const type = msg.media._;
       return type === 'messageMediaPhoto' || type === 'messageMediaDocument';
     });
 
-    const transformed = mediaMessages.map((msg: any) => {
-      const media = msg.media;
+    const transformed = mediaMessages.map((msg) => {
+      const media = msg.media!;
       let mediaType = 'photo';
       let mimeType = 'image/jpeg';
 
@@ -385,32 +629,34 @@ app.get('/api/messages', async (req: Request, res: Response) => {
         message: msg.message || '',
         mediaType,
         mimeType,
-        mediaUrl: `/api/media/${msg.id}`,
-        thumbnailUrl: `/api/media/${msg.id}?size=thumbnail`,
       };
     });
 
-    const hasMore = messages.messages.length === limit;
+    const rawMessages = messages.messages;
+    const hasMore = rawMessages.length === limit;
+    const lastOffsetId = rawMessages.length > 0 ? rawMessages[rawMessages.length - 1].id : 0;
 
     res.json({
       messages: transformed,
-      count: messages.count || messages.messages.length,
+      count: messages.count || rawMessages.length,
       hasMore,
+      lastOffsetId,
     });
   } catch (error: any) {
+    if (handleValidationError(error, res)) return;
     const errorMessage = handleMTProtoError(error);
     res.status(500).json({ error: errorMessage });
   }
 });
 
-// --- Media download endpoint ---
-app.get('/api/media/:messageId', async (req: Request, res: Response) => {
+// --- Media download endpoint (auth-guarded) ---
+app.get('/api/media/:messageId', requireAuth, async (req: Request, res: Response) => {
   try {
-    const messageId = parseInt(req.params.messageId as string);
-    const size: SizeMode = req.query.size === 'thumbnail' ? 'thumbnail' : 'full';
+    const { messageId } = validate(mediaParamsSchema, req.params);
+    const { size } = validate(mediaSizeQuerySchema, req.query);
     const cacheKey = `${messageId}_${size}`;
 
-    const cached = mediaCache.get(cacheKey);
+    const cached = cacheGet(cacheKey);
     if (cached) {
       res.set('Content-Type', cached.mimeType);
       res.set('Cache-Control', 'public, max-age=86400');
@@ -418,8 +664,7 @@ app.get('/api/media/:messageId', async (req: Request, res: Response) => {
       return;
     }
 
-    // Fetch the specific message
-    const result = await mtproto.call('messages.getMessages', {
+    const result: MessagesResponse = await mtproto.call('messages.getMessages', {
       id: [{ _: 'inputMessageID', id: messageId }]
     });
 
@@ -429,59 +674,32 @@ app.get('/api/media/:messageId', async (req: Request, res: Response) => {
       return;
     }
 
-    let fileData: Uint8Array;
-    let mimeType = 'image/jpeg';
-
-    if (msg.media._ === 'messageMediaPhoto' && msg.media.photo) {
-      const photo = msg.media.photo;
-      const photoSize = pickPhotoSize(photo.sizes, size);
-
-      const location = {
-        _: 'inputPhotoFileLocation',
-        id: photo.id,
-        access_hash: photo.access_hash,
-        file_reference: photo.file_reference,
-        thumb_size: photoSize.type,
-      };
-
-      fileData = await downloadFile(location, photo.dc_id);
-      mimeType = 'image/jpeg';
-    } else if (msg.media._ === 'messageMediaDocument' && msg.media.document) {
-      const doc = msg.media.document;
-      mimeType = doc.mime_type || 'application/octet-stream';
-
-      if (size === 'thumbnail' && doc.thumbs?.length > 0) {
-        const thumb = pickPhotoSize(doc.thumbs, 'thumbnail');
-        const location = {
-          _: 'inputDocumentFileLocation',
-          id: doc.id,
-          access_hash: doc.access_hash,
-          file_reference: doc.file_reference,
-          thumb_size: thumb.type,
-        };
-        fileData = await downloadFile(location, doc.dc_id);
-        mimeType = 'image/jpeg';
-      } else {
-        const location = {
-          _: 'inputDocumentFileLocation',
-          id: doc.id,
-          access_hash: doc.access_hash,
-          file_reference: doc.file_reference,
-          thumb_size: '',
-        };
-        fileData = await downloadFile(location, doc.dc_id);
-      }
-    } else {
+    const locInfo = fetchLocationAndMime(msg, size);
+    if (!locInfo) {
       res.status(404).json({ error: 'Unsupported media type' });
       return;
     }
 
-    cacheSet(cacheKey, fileData, mimeType);
+    const onExpired = async (): Promise<InputFileLocation> => {
+      const fresh: MessagesResponse = await mtproto.call('messages.getMessages', {
+        id: [{ _: 'inputMessageID', id: messageId }]
+      });
+      const freshMsg = fresh.messages?.[0];
+      if (!freshMsg?.media) throw new Error('Media not found on refresh');
+      const freshLoc = fetchLocationAndMime(freshMsg, size);
+      if (!freshLoc) throw new Error('Unsupported media type on refresh');
+      return freshLoc.location;
+    };
 
-    res.set('Content-Type', mimeType);
+    const fileData = await downloadFile(locInfo.location, locInfo.dcId, onExpired);
+
+    cacheSet(cacheKey, fileData, locInfo.mimeType);
+
+    res.set('Content-Type', locInfo.mimeType);
     res.set('Cache-Control', 'public, max-age=86400');
     res.send(Buffer.from(fileData));
   } catch (error: any) {
+    if (handleValidationError(error, res)) return;
     console.error('Media download error:', error);
     res.status(500).json({ error: 'Failed to download media' });
   }

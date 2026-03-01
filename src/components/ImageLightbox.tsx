@@ -22,6 +22,12 @@ export function ImageLightbox({
   onNavigate,
 }: ImageLightboxProps) {
   const [imgLoaded, setImgLoaded] = useState(false);
+
+  if (currentIndex < 0 || currentIndex >= images.length) {
+    onClose();
+    return null;
+  }
+
   const image = images[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < images.length - 1;
@@ -49,9 +55,18 @@ export function ImageLightbox({
   }, [handleKeyDown]);
 
   const handleDownload = () => {
+    const extMap: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/gif": "gif",
+      "image/webp": "webp",
+      "video/mp4": "mp4",
+      "application/pdf": "pdf",
+    };
+    const ext = extMap[image.mimeType] || image.mimeType?.split("/")[1] || "bin";
     const a = document.createElement("a");
     a.href = image.mediaUrl;
-    a.download = `telegram-${image.id}.jpg`;
+    a.download = `telegram-${image.id}.${ext}`;
     a.target = "_blank";
     a.click();
   };
@@ -135,18 +150,16 @@ export function ImageLightbox({
       </div>
 
       {/* Bottom caption */}
-      {(image.message || dateStr) && (
-        <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-4 bg-gradient-to-t from-black/60 to-transparent">
-          <div className="max-w-2xl mx-auto text-center">
-            {image.message && (
-              <p className="text-white/85 text-sm leading-relaxed mb-1">
-                {image.message}
-              </p>
-            )}
-            <p className="text-white/40 text-xs">{dateStr}</p>
-          </div>
+      <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-4 bg-gradient-to-t from-black/60 to-transparent">
+        <div className="max-w-2xl mx-auto text-center">
+          {image.message && (
+            <p className="text-white/85 text-sm leading-relaxed mb-1">
+              {image.message}
+            </p>
+          )}
+          <p className="text-white/40 text-xs">{dateStr}</p>
         </div>
-      )}
+      </div>
     </div>
   );
 }

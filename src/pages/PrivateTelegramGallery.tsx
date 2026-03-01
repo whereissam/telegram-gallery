@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { AuthForm } from "@/components/AuthForm";
-import { GalleryGrid, type GalleryImage } from "@/components/GalleryGrid";
+import { GalleryGrid, type GalleryImage, type ColumnCount } from "@/components/GalleryGrid";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Loader2, ImageIcon, RefreshCw } from "lucide-react";
+import { Loader2, ImageIcon, RefreshCw, LogOut, Search, X, Grid2x2, Grid3x3, LayoutGrid } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -14,8 +14,12 @@ export function PrivateTelegramGallery() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [lastOffsetId, setLastOffsetId] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [columns, setColumns] = useState<ColumnCount>(3);
+  const [searchQuery, setSearchQuery] = useState("");
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   // Check auth status on mount
   useEffect(() => {
@@ -50,6 +54,7 @@ export function PrivateTelegramGallery() {
           date: msg.date,
           message: msg.message,
           mediaType: msg.mediaType,
+          mimeType: msg.mimeType || "image/jpeg",
           mediaUrl: `${API_URL}/media/${msg.id}`,
           thumbnailUrl: `${API_URL}/media/${msg.id}?size=thumbnail`,
         }));
@@ -60,6 +65,7 @@ export function PrivateTelegramGallery() {
           setImages(newImages);
         }
         setHasMore(data.hasMore);
+        setLastOffsetId(data.lastOffsetId || 0);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to fetch images"
@@ -77,11 +83,50 @@ export function PrivateTelegramGallery() {
     if (isAuthenticated) fetchMessages();
   }, [isAuthenticated, fetchMessages]);
 
-  const handleLoadMore = () => {
-    if (images.length === 0) return;
-    const lastId = images[images.length - 1].id;
-    fetchMessages(lastId);
+  const handleLoadMore = useCallback(() => {
+    if (lastOffsetId === 0 || loadingMore) return;
+    fetchMessages(lastOffsetId);
+  }, [lastOffsetId, loadingMore, fetchMessages]);
+
+  // Infinite scroll via IntersectionObserver
+  useEffect(() => {
+    if (!hasMore || loadingMore || searchQuery) return;
+
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          handleLoadMore();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, searchQuery, handleLoadMore]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/logout`, { method: "POST" });
+    } catch {
+      // ignore
+    }
+    setIsAuthenticated(false);
+    setImages([]);
+    setHasMore(false);
+    setLastOffsetId(0);
+    setSearchQuery("");
   };
+
+  // Client-side search filter
+  const filteredImages = useMemo(() => {
+    if (!searchQuery.trim()) return images;
+    const q = searchQuery.toLowerCase();
+    return images.filter((img) => img.message.toLowerCase().includes(q));
+  }, [images, searchQuery]);
 
   // Auth check loading
   if (isAuthenticated === null) {
@@ -100,6 +145,12 @@ export function PrivateTelegramGallery() {
       />
     );
   }
+
+  const columnOptions: { value: ColumnCount; icon: typeof Grid2x2 }[] = [
+    { value: 2, icon: Grid2x2 },
+    { value: 3, icon: Grid3x3 },
+    { value: 4, icon: LayoutGrid },
+  ];
 
   // Authenticated - gallery view
   return (
@@ -124,15 +175,66 @@ export function PrivateTelegramGallery() {
               <p className="text-xs text-muted-foreground">Saved Messages</p>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => fetchMessages()}
-            disabled={loading}
-            className="text-muted-foreground hover:text-foreground cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+
+          <div className="flex items-center gap-1">
+            {/* Search */}
+            <div className="relative flex items-center">
+              <Search className="absolute left-2.5 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search captions..."
+                className="h-8 w-40 rounded-md bg-secondary/50 border border-border/50 pl-8 pr-7 text-xs placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-1.5 p-0.5 rounded hover:bg-secondary cursor-pointer"
+                >
+                  <X className="w-3 h-3 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+
+            {/* Grid toggle */}
+            <div className="flex items-center ml-1 rounded-md border border-border/50 overflow-hidden">
+              {columnOptions.map(({ value, icon: Icon }) => (
+                <button
+                  key={value}
+                  onClick={() => setColumns(value)}
+                  className={`p-1.5 cursor-pointer transition-colors ${
+                    columns === value
+                      ? "bg-secondary text-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  }`}
+                  title={`${value} columns`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                </button>
+              ))}
+            </div>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchMessages()}
+              disabled={loading}
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
+              title="Logout"
+            >
+              <LogOut className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -159,7 +261,7 @@ export function PrivateTelegramGallery() {
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty state — no images at all */}
         {!loading && images.length === 0 && !error && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div
@@ -177,30 +279,37 @@ export function PrivateTelegramGallery() {
           </div>
         )}
 
+        {/* Empty state — search has no results */}
+        {!loading && images.length > 0 && filteredImages.length === 0 && searchQuery && (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+              style={{ background: "hsl(220 14% 14%)" }}
+            >
+              <Search className="w-7 h-7 text-muted-foreground/40" />
+            </div>
+            <p className="text-muted-foreground text-sm mb-1">
+              No results for "{searchQuery}"
+            </p>
+            <p className="text-muted-foreground/60 text-xs">
+              Try a different search term
+            </p>
+          </div>
+        )}
+
         {/* Gallery */}
         <GalleryGrid
-          images={images}
+          images={filteredImages}
           onImageClick={(index) => setLightboxIndex(index)}
+          columns={columns}
         />
 
-        {/* Load more */}
-        {hasMore && (
-          <div className="flex justify-center py-8">
-            <Button
-              variant="outline"
-              onClick={handleLoadMore}
-              disabled={loadingMore}
-              className="cursor-pointer"
-            >
-              {loadingMore ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Loading...
-                </>
-              ) : (
-                "Load More"
-              )}
-            </Button>
+        {/* Infinite scroll sentinel */}
+        {hasMore && !searchQuery && (
+          <div ref={sentinelRef} className="flex justify-center py-8">
+            {loadingMore && (
+              <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+            )}
           </div>
         )}
       </main>
@@ -208,7 +317,7 @@ export function PrivateTelegramGallery() {
       {/* Lightbox */}
       {lightboxIndex !== null && (
         <ImageLightbox
-          images={images}
+          images={filteredImages}
           currentIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
           onNavigate={(index) => setLightboxIndex(index)}
