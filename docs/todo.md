@@ -2,36 +2,68 @@
 
 ## Project Status
 
-The project has a basic client (React + Vite) and server (Express + MTProto) with authentication flow partially working. The gallery display exists but image downloading from Telegram is not yet connected.
+Core E2E pipeline is working: Telegram auth flow (phone → code → 2FA), image download from Saved Messages via MTProto, and a polished gallery UI with masonry grid, lightbox, and pagination. Stack: React 19, Vite 6, Tailwind CSS 4, Express 4, `@mtproto/core`.
 
 ---
 
-## High Priority
+## Completed
+
+### Package Upgrades
+- [x] React 18 → React 19
+- [x] Tailwind CSS 3 → Tailwind CSS 4 (deleted `tailwind.config.js`, using `@tailwindcss/vite`)
+- [x] TypeScript 5.6 → 5.9
+- [x] All shadcn/ui deps → latest
 
 ### Server - Image Download Pipeline
-- [ ] Implement `upload.getFile` to actually download photo/document media from Telegram
-- [ ] Add endpoint `GET /api/media/:messageId` that streams image bytes to the client
-- [ ] Handle different photo sizes (thumbnail, medium, full) from `photoSize` array
-- [ ] Support both `messageMediaPhoto` and `messageMediaDocument` (for GIFs, stickers, etc.)
-- [ ] Cache downloaded images locally (or in memory) to avoid re-downloading
+- [x] Implement `upload.getFile` to download photo/document media from Telegram (256KB chunked)
+- [x] Add endpoint `GET /api/media/:messageId` with `?size=thumbnail|full`
+- [x] Handle different photo sizes via `pickPhotoSize()` helper
+- [x] Support both `messageMediaPhoto` and `messageMediaDocument`
+- [x] In-memory cache (max 200 entries) with `Cache-Control` headers
 
 ### Server - Fix Messages Endpoint
-- [ ] `/api/messages` currently returns raw `msg.media` objects — transform them to include downloadable URLs (e.g., `/api/media/{msgId}`)
-- [ ] Filter messages to only return those with photo/document media
-- [ ] Add pagination support (`offset_id`, `limit` query params)
-- [ ] Return total count for pagination UI
+- [x] `/api/messages` returns `{ messages, count, hasMore }` with media URLs
+- [x] Filter to only photo/document messages
+- [x] Pagination via `?offset_id=N&limit=N`
 
-### Client - Connect Gallery to Real Data
-- [ ] Update `PrivateTelegramGallery.tsx` — map `msg.media` to actual image URLs via `/api/media/:id`
-- [ ] Add lazy loading / infinite scroll for image gallery
-- [ ] Implement image lightbox/modal for full-size viewing
-- [ ] Show loading skeleton while images load
-- [ ] Handle messages with no media gracefully
+### Client - Gallery UI
+- [x] Masonry grid with CSS columns (responsive 1/2/3 cols)
+- [x] Lazy loading thumbnails with fade-in animation
+- [x] Full-screen lightbox with keyboard nav, download button
+- [x] Loading skeletons, empty state, error display
+- [x] "Load More" pagination
+- [x] Auto-check auth status on mount (skip login if session valid)
+- [x] `VITE_API_URL` env var support
 
 ### Fix 2FA / SRP Issues
-- [ ] Server `calculateSRP()` is called with only 1 arg but expects 3 (`password`, `srpB`, `srpId`) — the extra params are fetched internally but signature is misleading
-- [ ] `/api/verify-password` endpoint is incomplete (placeholder SRP) — consolidate with `/api/verify-2fa`
-- [ ] Remove duplicate/dead endpoint (`verify-password` vs `verify-2fa`)
+- [x] `calculateSRP()` signature cleaned up (removed unused params)
+- [x] Deleted dead `/api/verify-password` endpoint
+- [x] Return `srp_id` (not `srpId`) from SRP calculation
+
+### Server Improvements
+- [x] Added `.env.example` files for both client and server
+- [x] Removed unused `crypto` and `path` npm packages from `server/package.json`
+- [x] Removed unused client-side `@mtproto/core` dep
+- [x] Fixed `__dirname` → `import.meta.dirname` (server + vite config)
+- [x] CORS origin configurable via `CORS_ORIGIN` env var
+- [x] Added `GET /api/auth/status` endpoint
+- [x] Added `import 'dotenv/config'` to server
+
+### Client Cleanup
+- [x] Deleted unused `src/lib/mtproto.ts`
+- [x] Deleted `src/App.css`
+- [x] Fixed `retryFetch` (moved to AuthForm, proper return type)
+- [x] Removed unused `fetchWithTimeout`
+- [x] Removed unused `React` import in `main.tsx`
+- [x] Simplified `App.tsx` (removed nav bar)
+- [x] `Home.tsx` redirects to `/gallery`
+
+### Known Bugs — Fixed
+- [x] `retryFetch` return type issue
+- [x] `fetchWithTimeout` unused — removed
+- [x] `src/lib/mtproto.ts` unused — deleted
+- [x] Server `__dirname` ESM issue — fixed
+- [x] CORS hardcoded — now configurable
 
 ---
 
@@ -39,34 +71,28 @@ The project has a basic client (React + Vite) and server (Express + MTProto) wit
 
 ### Authentication Improvements
 - [ ] Add session persistence — currently auth is lost on server restart
-- [ ] Add `GET /api/auth/status` endpoint to check if already authenticated
-- [ ] Client: auto-check auth status on page load (skip login if session exists)
 - [ ] Add logout endpoint and UI button
-- [ ] Move `API_URL` to env variable (`VITE_API_URL`)
+- [ ] Handle `FILE_REFERENCE_EXPIRED` errors (re-fetch message to get fresh reference)
 
 ### Client UI Enhancements
-- [ ] Implement search functionality (currently just a placeholder input)
+- [ ] Implement search functionality (by caption text)
 - [ ] Add image grid size toggle (2/3/4 columns)
 - [ ] Add date-based grouping/sorting for images
-- [ ] Improve responsive layout for mobile
-- [ ] Add empty state when no images found
 - [ ] Add error boundary component
+- [ ] Infinite scroll instead of "Load More" button
 
 ### Server Improvements
-- [ ] Add `.env.example` files for both client and server
 - [ ] Add request validation with Zod
 - [ ] Add rate limiting to auth endpoints
 - [ ] Add proper TypeScript types for MTProto responses
-- [ ] Remove unused `crypto` and `path` npm packages (built-in to Node/Bun)
-- [ ] Remove unused client-side `@mtproto/core` and `telegram-mtproto` deps (MTProto runs server-side only)
+- [ ] Persist media cache to disk (survives server restart)
 
 ---
 
 ## Low Priority
 
 ### Project Structure
-- [ ] README references `packages/client` and `packages/server` but actual structure is flat (`src/` + `server/`) — update README or restructure
-- [ ] Add monorepo setup (workspaces) if keeping both packages
+- [x] README references `packages/client` and `packages/server` but actual structure is flat (`src/` + `server/`) — updated both READMEs
 - [ ] Add shared types between client and server
 - [ ] Add `concurrently` or `turbo` script to start both dev servers with one command
 
@@ -78,35 +104,9 @@ The project has a basic client (React + Vite) and server (Express + MTProto) wit
 
 ### Features (Roadmap)
 - [ ] Image batch download/export
-- [ ] Advanced search (by date, caption text, media type)
+- [ ] Advanced search (by date, media type)
 - [ ] Folder/tag organization
 - [ ] Image editing (crop, rotate)
-- [ ] Video support
+- [ ] Video support (streaming)
+- [ ] Mobile application (React Native or PWA)
 - [ ] Offline mode with service worker
-- [ ] Dark mode toggle
-
----
-
-## Package Upgrades Needed
-
-### Client (`package.json`)
-- React 18 → React 19
-- Vite 6 → latest
-- TanStack Router → latest
-- Tailwind CSS 3 → Tailwind CSS 4
-- TypeScript 5.6 → latest
-- All shadcn/ui related deps → latest
-
-### Server (`server/package.json`)
-- Express 4 → Express 5
-- All deps → latest
-- Remove unnecessary `crypto` and `path` packages (Node/Bun built-ins)
-
----
-
-## Known Bugs
-- [ ] `retryFetch` in `PrivateTelegramGallery.tsx` returns `undefined` if all retries fail (missing return type)
-- [ ] `fetchWithTimeout` is defined but never used
-- [ ] Client-side `src/lib/mtproto.ts` is unused (MTProto runs server-side)
-- [ ] Server `__dirname` may not work in ESM mode — needs `import.meta.dirname` or `fileURLToPath`
-- [ ] CORS only allows `localhost:5173` — needs to be configurable via env

@@ -1,282 +1,218 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { useState, useEffect, useCallback } from "react";
+import { AuthForm } from "@/components/AuthForm";
+import { GalleryGrid, type GalleryImage } from "@/components/GalleryGrid";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Loader2, ImageIcon, RefreshCw } from "lucide-react";
 
-interface Image {
-  id: number;
-  url: string;
-  caption: string;
-}
-
-const API_URL = "http://localhost:3000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 export function PrivateTelegramGallery() {
-  const [images, setImages] = useState<Image[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [images, setImages] = useState<GalleryImage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
-  const [showCodeInput, setShowCodeInput] = useState(false);
-  const [phoneCodeHash, setPhoneCodeHash] = useState<string>("");
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
-  const [needsPassword, setNeedsPassword] = useState(false);
-  const [password, setPassword] = useState("");
-
-  const handleSendCode = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await retryFetch(`${API_URL}/sendCode`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ phone: phoneNumber }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to send code");
-      }
-
-      const data = await response.json();
-      setPhoneCodeHash(data.phone_code_hash);
-      setShowCodeInput(true);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Connection failed. Please try again."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const retryFetch = async (
-    url: string,
-    options: RequestInit,
-    maxRetries = 3
-  ): Promise<Response> => {
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const response = await fetch(url, {
-          ...options,
-          headers: {
-            ...options.headers,
-            "Keep-Alive": "timeout=5, max=1000",
-          },
-        });
-        return response;
-      } catch (error) {
-        if (i === maxRetries - 1) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
-      }
-    }
-    throw new Error("Max retries exceeded");
-  };
-
-  const handleSignIn = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await retryFetch(`${API_URL}/signIn`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          phone: phoneNumber,
-          code: verificationCode,
-          phone_code_hash: phoneCodeHash,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.requiresPassword) {
-        setNeedsPassword(true);
-      } else if (!response.ok) {
-        throw new Error(data.error || "Failed to sign in");
-      } else {
-        setIsAuthenticated(true);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchSavedMessages = async () => {
-    if (!isAuthenticated) return;
-
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/messages`, {
-        method: "GET",
-        credentials: "include", // Include session cookie
-      });
-
-      if (!response.ok) throw new Error("Failed to fetch messages");
-
-      const data = await response.json();
-      setImages(
-        data.messages.map((msg: any) => ({
-          id: msg.id,
-          url: msg.imageUrl,
-          caption: msg.caption || `Image ${msg.id}`,
-        }))
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch images");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePasswordSubmit = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${API_URL}/verify-2fa`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to verify password");
-      }
-
-      setIsAuthenticated(true);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Password verification failed"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Check auth status on mount
   useEffect(() => {
-    let mounted = true;
-    if (isAuthenticated && mounted) {
-      fetchSavedMessages();
-    }
-    return () => {
-      mounted = false;
+    const checkAuth = async () => {
+      try {
+        const res = await fetch(`${API_URL}/auth/status`);
+        const data = await res.json();
+        setIsAuthenticated(data.authenticated);
+      } catch {
+        setIsAuthenticated(false);
+      }
     };
-  }, [isAuthenticated]);
+    checkAuth();
+  }, []);
 
-  if (!isAuthenticated) {
+  const fetchMessages = useCallback(
+    async (offsetId = 0) => {
+      const isLoadMore = offsetId > 0;
+      if (isLoadMore) setLoadingMore(true);
+      else setLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch(
+          `${API_URL}/messages?offset_id=${offsetId}&limit=30`
+        );
+        if (!res.ok) throw new Error("Failed to fetch messages");
+        const data = await res.json();
+
+        const newImages: GalleryImage[] = data.messages.map((msg: any) => ({
+          id: msg.id,
+          date: msg.date,
+          message: msg.message,
+          mediaType: msg.mediaType,
+          mediaUrl: `${API_URL}/media/${msg.id}`,
+          thumbnailUrl: `${API_URL}/media/${msg.id}?size=thumbnail`,
+        }));
+
+        if (isLoadMore) {
+          setImages((prev) => [...prev, ...newImages]);
+        } else {
+          setImages(newImages);
+        }
+        setHasMore(data.hasMore);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to fetch images"
+        );
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    []
+  );
+
+  // Fetch messages when authenticated
+  useEffect(() => {
+    if (isAuthenticated) fetchMessages();
+  }, [isAuthenticated, fetchMessages]);
+
+  const handleLoadMore = () => {
+    if (images.length === 0) return;
+    const lastId = images[images.length - 1].id;
+    fetchMessages(lastId);
+  };
+
+  // Auth check loading
+  if (isAuthenticated === null) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-6">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-6">
-            <h2 className="text-2xl font-bold mb-4">Connect to Telegram</h2>
-            <div className="space-y-4">
-              {!showCodeInput ? (
-                <Input
-                  type="tel"
-                  placeholder="Phone number (e.g., +1234567890)"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  disabled={loading}
-                />
-              ) : needsPassword ? (
-                <Input
-                  type="password"
-                  placeholder="Enter your 2FA password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading}
-                />
-              ) : (
-                <Input
-                  type="text"
-                  placeholder="Verification code"
-                  value={verificationCode}
-                  onChange={(e) => setVerificationCode(e.target.value)}
-                  disabled={loading}
-                />
-              )}
-
-              {error && <p className="text-red-500 text-sm">{error}</p>}
-
-              <Button
-                onClick={
-                  needsPassword
-                    ? handlePasswordSubmit
-                    : showCodeInput
-                      ? handleSignIn
-                      : handleSendCode
-                }
-                className="w-full"
-                disabled={loading}
-              >
-                {loading
-                  ? "Processing..."
-                  : needsPassword
-                    ? "Verify Password"
-                    : showCodeInput
-                      ? "Sign In"
-                      : "Send Code"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-muted-foreground animate-spin" />
       </div>
     );
   }
 
+  // Not authenticated
+  if (!isAuthenticated) {
+    return (
+      <AuthForm
+        onAuthenticated={() => setIsAuthenticated(true)}
+      />
+    );
+  }
+
+  // Authenticated - gallery view
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-4">Your Private Gallery</h1>
-        <div className="flex gap-4">
-          <Input
-            type="text"
-            placeholder="Search your images..."
-            className="max-w-md"
-          />
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="sticky top-0 z-40 glass-panel">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "hsl(199 89% 58% / 0.15)" }}
+            >
+              <ImageIcon
+                className="w-4 h-4"
+                style={{ color: "hsl(199 89% 58%)" }}
+              />
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold tracking-tight">
+                Telegram Gallery
+              </h1>
+              <p className="text-xs text-muted-foreground">Saved Messages</p>
+            </div>
+          </div>
           <Button
-            variant="outline"
-            onClick={fetchSavedMessages}
+            variant="ghost"
+            size="sm"
+            onClick={() => fetchMessages()}
             disabled={loading}
+            className="text-muted-foreground hover:text-foreground cursor-pointer"
           >
-            Refresh
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>
-      </div>
+      </header>
 
-      {loading ? (
-        <div className="flex justify-center items-center h-64">
-          <p className="text-gray-500">Loading your images...</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {images.map((image) => (
-            <Card key={image.id} className="overflow-hidden">
-              <CardContent className="p-4">
-                <div className="relative aspect-video mb-2">
-                  <img
-                    src={image.url}
-                    alt={image.caption}
-                    className="object-cover rounded-lg"
-                  />
-                </div>
-                <p className="text-sm text-gray-600">{image.caption}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+      {/* Content */}
+      <main className="max-w-6xl mx-auto px-4 py-6">
+        {error && (
+          <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 mb-6">
+            <p className="text-destructive text-sm">{error}</p>
+          </div>
+        )}
+
+        {/* Loading skeletons */}
+        {loading && images.length === 0 && (
+          <div className="columns-1 sm:columns-2 lg:columns-3 gap-3">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <Skeleton
+                key={i}
+                className="mb-3 rounded-xl break-inside-avoid"
+                style={{
+                  height: `${[200, 280, 220, 300, 240, 260, 190, 310, 230][i]}px`,
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loading && images.length === 0 && !error && (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+              style={{ background: "hsl(220 14% 14%)" }}
+            >
+              <ImageIcon className="w-7 h-7 text-muted-foreground/40" />
+            </div>
+            <p className="text-muted-foreground text-sm mb-1">
+              No images found
+            </p>
+            <p className="text-muted-foreground/60 text-xs">
+              Send photos to your Saved Messages in Telegram
+            </p>
+          </div>
+        )}
+
+        {/* Gallery */}
+        <GalleryGrid
+          images={images}
+          onImageClick={(index) => setLightboxIndex(index)}
+        />
+
+        {/* Load more */}
+        {hasMore && (
+          <div className="flex justify-center py-8">
+            <Button
+              variant="outline"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="cursor-pointer"
+            >
+              {loadingMore ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                "Load More"
+              )}
+            </Button>
+          </div>
+        )}
+      </main>
+
+      {/* Lightbox */}
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          images={images}
+          currentIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={(index) => setLightboxIndex(index)}
+        />
       )}
     </div>
   );
