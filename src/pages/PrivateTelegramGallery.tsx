@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -59,7 +59,7 @@ export function PrivateTelegramGallery() {
     url: string,
     options: RequestInit,
     maxRetries = 3
-  ) => {
+  ): Promise<Response> => {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const response = await fetch(url, {
@@ -75,6 +75,7 @@ export function PrivateTelegramGallery() {
         await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
       }
     }
+    throw new Error("Max retries exceeded");
   };
 
   const handleSignIn = async () => {
@@ -161,27 +162,6 @@ export function PrivateTelegramGallery() {
       );
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchWithTimeout = async (
-    url: string,
-    options: RequestInit,
-    timeout = 30000
-  ) => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      return response;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      throw error;
     }
   };
 
