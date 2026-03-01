@@ -28,7 +28,7 @@ Before installation, ensure you have:
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/yourusername/telegram-gallery.git
+   git clone https://github.com/whereissam/telegram-gallery.git
    cd telegram-gallery
    ```
 
@@ -170,7 +170,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Need help? Here are some options:
 
-- Create an issue in the [GitHub repository](https://github.com/yourusername/telegram-gallery/issues)
+- Create an issue in the [GitHub repository](https://github.com/whereissam/telegram-gallery/issues)
 - Join our [Discord community](https://discord.gg/yourdiscord)
 - Check out the [FAQ](docs/FAQ.md)
 
