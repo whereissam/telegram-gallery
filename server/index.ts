@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express, { type Request, type Response } from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import MTProto from '@mtproto/core';
 import path from 'path';
@@ -7,6 +7,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { z } from 'zod/v4';
 import rateLimit from 'express-rate-limit';
+import type { MediaMessage, MessagesApiResponse, AuthStatusResponse } from '../shared/types';
 
 // --- Config ---
 const corsOptions = {
@@ -68,7 +69,7 @@ mtproto.updateInitConnectionParams({
 });
 
 // --- Auth middleware ---
-async function requireAuth(_req: Request, res: Response, next: Function) {
+async function requireAuth(_req: Request, res: Response, next: NextFunction) {
   try {
     await mtproto.call('users.getUsers', { id: [{ _: 'inputUserSelf' }] });
     next();
@@ -252,7 +253,7 @@ const calculateSRP = async (password: string) => {
     };
   } catch (error) {
     console.error('SRP calculation error:', error);
-    throw new Error('Failed to calculate SRP parameters');
+    throw new Error('Failed to calculate SRP parameters', { cause: error });
   }
 };
 
@@ -482,12 +483,14 @@ app.get('/api/auth/status', async (_req: Request, res: Response) => {
       id: [{ _: 'inputUserSelf' }]
     });
     const user = result[0];
-    res.json({
+    const body: AuthStatusResponse = {
       authenticated: true,
       user: { id: user.id, first_name: user.first_name, last_name: user.last_name },
-    });
-  } catch (_error: any) {
-    res.json({ authenticated: false });
+    };
+    res.json(body);
+  } catch {
+    const body: AuthStatusResponse = { authenticated: false };
+    res.json(body);
   }
 });
 
@@ -613,9 +616,9 @@ app.get('/api/messages', requireAuth, async (req: Request, res: Response) => {
       return type === 'messageMediaPhoto' || type === 'messageMediaDocument';
     });
 
-    const transformed = mediaMessages.map((msg) => {
+    const transformed: MediaMessage[] = mediaMessages.map((msg) => {
       const media = msg.media!;
-      let mediaType = 'photo';
+      let mediaType: MediaMessage['mediaType'] = 'photo';
       let mimeType = 'image/jpeg';
 
       if (media._ === 'messageMediaDocument' && media.document) {
@@ -636,12 +639,13 @@ app.get('/api/messages', requireAuth, async (req: Request, res: Response) => {
     const hasMore = rawMessages.length === limit;
     const lastOffsetId = rawMessages.length > 0 ? rawMessages[rawMessages.length - 1].id : 0;
 
-    res.json({
+    const body: MessagesApiResponse = {
       messages: transformed,
       count: messages.count || rawMessages.length,
       hasMore,
       lastOffsetId,
-    });
+    };
+    res.json(body);
   } catch (error: any) {
     if (handleValidationError(error, res)) return;
     const errorMessage = handleMTProtoError(error);

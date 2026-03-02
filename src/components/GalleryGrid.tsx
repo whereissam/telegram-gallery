@@ -1,13 +1,9 @@
 import { useState, useCallback, useMemo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ImageIcon } from "lucide-react";
+import type { MediaMessage } from "../../shared/types";
 
-export interface GalleryImage {
-  id: number;
-  date: number;
-  message: string;
-  mediaType: string;
-  mimeType: string;
+export interface GalleryImage extends MediaMessage {
   mediaUrl: string;
   thumbnailUrl: string;
 }

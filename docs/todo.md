@@ -89,18 +89,18 @@ Core E2E pipeline is working: Telegram auth flow (phone → code → 2FA), image
 
 ---
 
-## Low Priority
+## Low Priority — Completed
 
 ### Project Structure
 - [x] README references `packages/client` and `packages/server` but actual structure is flat (`src/` + `server/`) — updated both READMEs
-- [ ] Add shared types between client and server
-- [ ] Add `concurrently` or `turbo` script to start both dev servers with one command
+- [x] Add shared types between client and server (`shared/types.ts`)
+- [x] Add `concurrently` script to start both dev servers (`bun run dev:all`)
 
 ### Developer Experience
-- [ ] Add ESLint config for server directory
-- [ ] Add Prettier configuration
-- [ ] Add pre-commit hooks (husky + lint-staged)
-- [ ] Add basic test setup (Vitest for client, bun test for server)
+- [x] Add ESLint config for server directory (`server/eslint.config.js`)
+- [x] Add Prettier configuration (`.prettierrc`)
+- [x] Add pre-commit hooks (husky + lint-staged)
+- [x] Add basic test setup (Vitest for client, bun test for server)
 
 ### Features (Roadmap)
 - [ ] Image batch download/export

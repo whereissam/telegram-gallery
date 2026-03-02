@@ -1,0 +1,7 @@
+dist
+node_modules
+server/node_modules
+server/sessions
+server/cache
+bun.lockb
+server/bun.lockb

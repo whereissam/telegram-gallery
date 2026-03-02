@@ -5,6 +5,7 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Loader2, ImageIcon, RefreshCw, LogOut, Search, X, Grid2x2, Grid3x3, LayoutGrid } from "lucide-react";
+import type { MessagesApiResponse, AuthStatusResponse } from "../../shared/types";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -26,7 +27,7 @@ export function PrivateTelegramGallery() {
     const checkAuth = async () => {
       try {
         const res = await fetch(`${API_URL}/auth/status`);
-        const data = await res.json();
+        const data: AuthStatusResponse = await res.json();
         setIsAuthenticated(data.authenticated);
       } catch {
         setIsAuthenticated(false);
@@ -47,14 +48,10 @@ export function PrivateTelegramGallery() {
           `${API_URL}/messages?offset_id=${offsetId}&limit=30`
         );
         if (!res.ok) throw new Error("Failed to fetch messages");
-        const data = await res.json();
+        const data: MessagesApiResponse = await res.json();
 
-        const newImages: GalleryImage[] = data.messages.map((msg: any) => ({
-          id: msg.id,
-          date: msg.date,
-          message: msg.message,
-          mediaType: msg.mediaType,
-          mimeType: msg.mimeType || "image/jpeg",
+        const newImages: GalleryImage[] = data.messages.map((msg) => ({
+          ...msg,
           mediaUrl: `${API_URL}/media/${msg.id}`,
           thumbnailUrl: `${API_URL}/media/${msg.id}?size=thumbnail`,
         }));
